@@ -1,11 +1,17 @@
+volumes:
+  video_uploads:
+    name: video_uploads_volume
+  video_outputs:
+    name: video_outputs_volume
+
 services:
   video-processor:
     build: ./video-processor
     ports:
       - "5001:5001"
     volumes:
-      - ./uploads:/app/uploads
-      - ./outputs:/app/outputs
+      - video_uploads:/app/uploads
+      - video_outputs:/app/outputs
 
   whisper-api:
     build: ./whisper-api
