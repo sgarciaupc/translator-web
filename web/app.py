@@ -36,6 +36,7 @@ def upload_file():
     file_path = os.path.join(UPLOAD_FOLDER, filename)
     file.save(file_path)
 
+    # Llamada a Whisper API para transcripción y traducción
     response = requests.post(
         WHISPER_API_URL,
         files={"file": open(file_path, "rb")},
@@ -43,12 +44,14 @@ def upload_file():
     )
     translated_text = response.json().get("transcription")
 
+    # Extraer audio completo del vídeo original
     original_clip = mp.VideoFileClip(file_path)
     original_audio_path = os.path.join(OUTPUT_FOLDER, "original_audio.mp3")
     original_clip.audio.write_audiofile(original_audio_path)
 
     original_audio = AudioSegment.from_mp3(original_audio_path)
 
+    # Detectar segmentos sin silencio (voz hablada)
     nonsilent_parts = silence.detect_nonsilent(
         original_audio, min_silence_len=500, silence_thresh=original_audio.dBFS - 14
     )
@@ -59,21 +62,24 @@ def upload_file():
     else:
         inicio_voz, fin_voz = 0, len(original_audio)
 
+    # Extraer segmentos intro, voz original y outro
     intro = original_audio[:inicio_voz]
     outro = original_audio[fin_voz:]
     original_voice_segment = original_audio[inicio_voz:fin_voz]
 
+    # Crear audio traducido concatenando frases individuales para mayor fluidez
     translated_voice = AudioSegment.empty()
     sentences = translated_text.split('. ')
-    
+
     for sentence in sentences:
         if sentence.strip():
-            tts = gTTS(sentence.strip(), lang=target_lang)
-            sentence_audio_path = os.path.join(OUTPUT_FOLDER, "temp_sentence.mp3")
-            tts.save(sentence_audio_path)
-            sentence_audio = AudioSegment.from_mp3(sentence_audio_path)
-            translated_voice = translated_voice + sentence_audio_path
+            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=True) as temp_audio:
+                tts = gTTS(sentence.strip(), lang=target_lang)
+                tts.save(tempfile)
+                sentence_audio = AudioSegment.from_mp3(sentence_audio_path)
+                translated_voice += sentence_audio
 
+    # Ajustar velocidad de voz traducida para sincronización exacta
     duration_original_voice = original_voice_segment.duration_seconds
     duration_translated_voice = translated_voice.duration_seconds
 
@@ -85,10 +91,12 @@ def upload_file():
 
     translated_voice = translated_voice.speedup(playback_speed=speed_factor, crossfade=0)
 
+    # Reconstruir audio completo con intro y outro original
     final_audio = intro + translated_voice + outro
     audio_final_path = os.path.join(OUTPUT_FOLDER, f"sync_{os.path.splitext(filename)[0]}_{target_lang}.mp3")
     final_audio.export(audio_final_path, format="mp3")
 
+    # Crear el vídeo final con audio traducido sincronizado
     final_audio_clip = mp.AudioFileClip(audio_final_path)
     final_video_clip = original_clip.set_audio(final_audio_clip)
 
