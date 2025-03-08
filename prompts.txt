@@ -1,5 +1,0 @@
-Necesito ayuda con un proyecto. El proyecto es una app web que , via web reciba un video y debemos indicar el audio original y el audio al que queremos traducir. 
-Inicialmente la aplicación debe poder recibir el video, elegir idioma origen y destino y al darle a proceder debe cargar el video, extraer el audio, transcribir el audio a texto traducir el texto desde el idioma original al idioma destino, generar un nuevo fichero de audio traducido y permitir descargarlo desde la misma web desde donde la hemos subido
-
-
-r

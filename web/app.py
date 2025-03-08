@@ -3,7 +3,7 @@ import requests
 from flask import Flask, request, render_template, jsonify, send_from_directory
 import moviepy.editor as mp
 from pydub import AudioSegment, silence
-import pyttsx3
+from gtts import gTTS
 
 app = Flask(__name__)
 
@@ -31,66 +31,61 @@ def upload_file():
     filename = file.filename
     source_lang = request.form.get("source_lang", "en")
     target_lang = request.form.get("target_lang", "es")
-    voice_gender = request.form.get("voice_gender", "male")  # 'male' o 'female'
 
     file_path = os.path.join(UPLOAD_FOLDER, filename)
     file.save(file_path)
 
-    # Obtener texto traducido
     response = requests.post(
         WHISPER_API_URL,
         files={"file": open(file_path, "rb")},
         data={"source_lang": source_lang, "target_lang": target_lang}
     )
-    result = response.json()
-    translated_text = result.get("transcription")
+    translated_text = response.json().get("transcription")
 
     # Extraer audio original completo
     original_clip = mp.VideoFileClip(file_path)
     original_audio_path = os.path.join(OUTPUT_FOLDER, "original_audio.mp3")
     original_clip.audio.write_audiofile(original_audio_path)
+
     original_audio = AudioSegment.from_mp3(original_audio_path)
 
-    # Detectar silencios para obtener inicio y final de voz original
-    non_silences = silence.detect_nonsilent(
-        original_audio, min_silence_len=700, silence_thresh=original_audio.dBFS - 16
+    # Detectar voz (evitando silencios largos)
+    nonsilent_parts = silence.detect_nonsilent(
+        original_audio, min_silence_len=500, silence_thresh=original_audio.dBFS - 16
     )
 
-    inicio_voz = non_silences[0][0]
-    fin_voz = non_silences[-1][1]
+    inicio_voz = nonsilent_parts[0][0]
+    fin_voz = nonsilent_parts[-1][1]
 
-    # Separar intro y outro musical
     intro = original_audio[:inicio_voz]
     outro = original_audio[fin_voz:]
+    original_voice_segment = original_audio[inicio_voz:fin_voz]
 
-    # Generar audio traducido con pyttsx3 (voz personalizable hombre/mujer)
-    engine = pyttsx3.init()
-    voices = engine.getProperty('voices')
-    
-    # Seleccionar voz según género
-    voice_id = voices[0].id if voice_gender == "male" else voices[1].id
-    engine.setProperty('voice', voice_id)
+    # Crear audio traducido con gTTS (estable y probado)
+    translated_audio_path_mp3 = os.path.join(OUTPUT_FOLDER, "translated_audio.mp3")
+    tts = gTTS(translated_text, lang=target_lang)
+    tts.save(translated_audio_path_mp3)
 
-    # Generar audio traducido en wav
-    audio_translated_path_wav = os.path.join(OUTPUT_FOLDER, "audio_translated.wav")
-    engine.save_to_file(translated_text, audio_translated_path_wav)
-    engine.runAndWait()
+    translated_voice = AudioSegment.from_mp3(translated_audio_path_mp3)
 
-    # Convertir audio WAV generado a MP3
-    translated_voice = AudioSegment.from_wav(audio_translated_path_wav)
+    # Sincronización ajustando duración traducida con la original
+    duration_original_voice = original_voice_segment.duration_seconds
+    duration_translated_voice = translated_voice.duration_seconds
 
-    # Ajustar duración exacta de audio traducido para coincidir exactamente con voz original
-    duration_original_voice = (fin_voz - inicio_voz)
-    translated_voice = translated_voice.set_frame_rate(44100)
-    translated_voice = translated_voice.speedup(playback_speed=(len(translated_voice) / duration_original_voice))
+    if duration_original_voice > 0 and duration_translated_voice > 0:
+        speed_factor = duration_translated_voice / duration_original_voice
+        speed_factor = max(0.8, min(speed_factor, 1.2))
+    else:
+        speed_factor = 1.0
 
-    # Ensamblar audio final completo: intro + voz traducida + outro
+    translated_voice = translated_voice.speedup(playback_speed=speed_factor, crossfade=0)
+
     final_audio = intro + translated_voice + outro
-    final_audio_path = os.path.join(OUTPUT_FOLDER, f"{os.path.splitext(filename)[0]}_{target_lang}_final.mp3")
-    final_audio.export(final_audio_path, format="mp3")
+    audio_final_path = os.path.join(OUTPUT_FOLDER, f"sync_{os.path.splitext(filename)[0]}_{target_lang}.mp3")
+    final_audio.export(audio_final_path, format="mp3")
 
-    # Combinar audio final con video original
-    final_audio_clip = mp.AudioFileClip(final_audio_path)
+    # Crear video sincronizado
+    final_audio_clip = mp.AudioFileClip(audio_final_path)
     final_video_clip = original_clip.set_audio(final_audio_clip)
 
     translated_video_filename = f"{os.path.splitext(filename)[0]}_{target_lang}_translated.mp4"
@@ -100,7 +95,7 @@ def upload_file():
     return jsonify({
         "message": "Procesamiento completado",
         "transcription": translated_text,
-        "translated_audio": f"/download/{os.path.basename(final_audio_path)}",
+        "translated_audio": f"/download/{os.path.basename(audio_final_path)}",
         "translated_video": f"/download_video/{translated_video_filename}"
     })
 
