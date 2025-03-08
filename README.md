@@ -98,12 +98,12 @@ video-web-translator/
 ├── transcriptions/         # Archivos de transcripción generados
 └── translated_videos/      # Videos traducidos
 ```
-##Contribuciones
+## Contribuciones
 ¡Las contribuciones son bienvenidas! Si deseas mejorar el proyecto o agregar nuevas funcionalidades, sigue estos pasos:
 
 - Realiza un fork del repositorio.
 - Crea una rama para tu feature o corrección.
 - Envía un pull request describiendo tus cambios.
 
-##Licencia
+## Licencia
 Este proyecto se distribuye bajo la Licencia MIT.
