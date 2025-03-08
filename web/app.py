@@ -73,11 +73,13 @@ def upload_file():
 
     for sentence in sentences:
         if sentence.strip():
-            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=True) as temp_audio:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as temp_audio:
+                temp_filename = temp_audio.name
                 tts = gTTS(sentence.strip(), lang=target_lang)
-                tts.save(tempfile)
-                sentence_audio = AudioSegment.from_mp3(sentence_audio_path)
+                tts.save(temp_filename)
+                sentence_audio = AudioSegment.from_mp3(temp_filename)
                 translated_voice += sentence_audio
+                os.remove(temp_filename)
 
     # Ajustar velocidad de voz traducida para sincronización exacta
     duration_original_voice = original_voice_segment.duration_seconds
