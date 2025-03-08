@@ -1,0 +1,6 @@
+openai-whisper
+torch
+torchaudio
+numpy
+flask
+googletrans==4.0.0-rc1

@@ -1,0 +1,35 @@
+services:
+  video-processor:
+    build: ./video-processor
+    ports:
+      - "5001:5001"
+    volumes:
+      - ./uploads:/app/uploads
+      - ./outputs:/app/outputs
+
+  whisper-api:
+    build: ./whisper-api
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./uploads:/app/uploads
+      - ./transcriptions:/app/transcriptions
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+  translator-web:
+    build: ./web
+    ports:
+      - "5002:5002"
+    volumes:
+      - ./uploads:/app/uploads
+      - ./outputs:/app/outputs
+      - ./transcriptions:/app/transcriptions
+      - ./translated_videos:/app/translated_videos
+    depends_on:
+      - video-processor
+      - whisper-api

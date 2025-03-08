@@ -1,0 +1,54 @@
+from flask import Flask, request, jsonify
+import whisper
+import os
+
+app = Flask(__name__)
+
+# Cargar modelo de Whisper (elige el tamaño según los recursos disponibles)
+model = whisper.load_model("small")
+
+UPLOAD_FOLDER = "uploads"
+OUTPUT_FOLDER = "transcriptions"
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(OUTPUT_FOLDER, exist_ok=True)
+
+@app.route('/transcribe', methods=['POST'])
+def transcribe_audio():
+    if 'file' not in request.files:
+        return jsonify({"error": "No se ha enviado ningún archivo"}), 400
+    
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "Nombre de archivo vacío"}), 400
+
+    file_path = os.path.join(UPLOAD_FOLDER, file.filename)
+    file.save(file_path)
+
+    # Obtener el idioma origen y destino de la solicitud
+    source_lang = request.form.get("source_lang", "en")  # Por defecto inglés
+    target_lang = request.form.get("target_lang", "es")  # Por defecto español
+
+    # Configurar Whisper según el idioma seleccionado
+    result = None
+    if source_lang == target_lang:
+        # Si el idioma de entrada y salida son iguales, solo transcribe
+        result = model.transcribe(file_path, language=source_lang)
+        transcription_text = result["text"]
+    else:
+        # Si los idiomas son diferentes, Whisper traduce al destino
+        result = model.translate(file_path)
+        transcription_text = result["text"]
+
+    # Guardar la transcripción o traducción en un archivo de texto
+    output_file_path = os.path.join(OUTPUT_FOLDER, file.filename + ".txt")
+    with open(output_file_path, "w") as text_file:
+        text_file.write(transcription_text)
+
+    return jsonify({
+        "message": "Procesamiento completado",
+        "transcription": transcription_text,
+        "file": output_file_path
+    })
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)

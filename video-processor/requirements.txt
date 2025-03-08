@@ -1,0 +1,7 @@
+flask
+flask-cors
+werkzeug
+opencv-python
+numpy
+imageio
+imageio[ffmpeg]
