@@ -28,4 +28,5 @@ RUN mkdir -p /app/uploads /app/outputs
 EXPOSE 5001
 
 # Comando para ejecutar la API
-CMD ["python", "app/main.py"]
+#CMD ["python", "app/main.py"]
+CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:5001", "app.main:app"]

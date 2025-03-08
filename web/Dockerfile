@@ -16,3 +16,4 @@ EXPOSE 5002
 
 # Ejecutar la aplicación Flask
 CMD ["python", "app.py"]
+#CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:5002", "app:app"]

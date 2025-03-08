@@ -12,6 +12,13 @@ services:
     volumes:
       - video_uploads:/app/uploads
       - video_outputs:/app/outputs
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
 
   whisper-api:
     build: ./whisper-api
@@ -27,6 +34,9 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
+
+
+
   translator-web:
     build: ./web
     ports:
@@ -39,3 +49,11 @@ services:
     depends_on:
       - video-processor
       - whisper-api
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

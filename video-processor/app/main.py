@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify
 import os
 from werkzeug.utils import secure_filename
-from utils import extract_audio, extract_frames
+from app.utils import extract_audio, extract_frames
 
 app = Flask(__name__)
 

@@ -1,125 +1,161 @@
 import os
+import uuid
+import threading
+import time
 import requests
-from flask import Flask, request, render_template, jsonify, send_from_directory
-import moviepy.editor as mp
-from pydub import AudioSegment, silence
-from gtts import gTTS
-import tempfile
+from flask import Flask, request, jsonify, render_template
 
 app = Flask(__name__)
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads")
-OUTPUT_FOLDER = os.path.join(BASE_DIR, "outputs")
-TRANSLATED_VIDEO_FOLDER = os.path.join(BASE_DIR, "translated_videos")
+# Diccionario global para almacenar el estado de los trabajos
+jobs = {}  # jobs[job_id] = {"status": ..., "progress": ..., "transcription": ..., "video_url": ...}
 
+UPLOAD_FOLDER = "/"
+TRANSLATED_VIDEOS_FOLDER = "translated_videos"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(OUTPUT_FOLDER, exist_ok=True)
-os.makedirs(TRANSLATED_VIDEO_FOLDER, exist_ok=True)
+os.makedirs(TRANSLATED_VIDEOS_FOLDER, exist_ok=True)
 
-WHISPER_API_URL = "http://whisper-api:5000/transcribe"
-
+########################################
+# 1. Página principal con formulario
+########################################
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html")  # En este HTML estará la barra de progreso y el form
 
+########################################
+# 2. Endpoint /upload
+########################################
 @app.route("/upload", methods=["POST"])
 def upload_file():
-    if "file" not in request.files:
+    """Recibe el archivo y parámetros de idioma. Lanza el procesamiento en un hilo."""
+    if 'file' not in request.files:
         return jsonify({"error": "No se ha enviado ningún archivo"}), 400
 
-    file = request.files["file"]
-    filename = file.filename
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "Nombre de archivo vacío"}), 400
+
+    # Generar un job_id único
+    job_id = str(uuid.uuid4())
+    jobs[job_id] = {
+        "status": "uploading",
+        "progress": 0,
+        "transcription": "",
+        "video_url": None,
+        "error": None
+    }
+
     source_lang = request.form.get("source_lang", "en")
     target_lang = request.form.get("target_lang", "es")
 
+    # Guardamos el archivo
+    filename = file.filename
     file_path = os.path.join(UPLOAD_FOLDER, filename)
     file.save(file_path)
 
-    # Llamada a Whisper API para transcripción y traducción
-    response = requests.post(
-        WHISPER_API_URL,
-        files={"file": open(file_path, "rb")},
-        data={"source_lang": source_lang, "target_lang": target_lang}
-    )
-    translated_text = response.json().get("transcription")
+    # Lanza un hilo para no bloquear la petición
+    thread = threading.Thread(target=process_file, args=(job_id, file_path, source_lang, target_lang))
+    thread.start()
 
-    # Extraer audio completo del vídeo original
-    original_clip = mp.VideoFileClip(file_path)
-    original_audio_path = os.path.join(OUTPUT_FOLDER, "original_audio.mp3")
-    original_clip.audio.write_audiofile(original_audio_path)
+    # Devolvemos el job_id inmediatamente
+    return jsonify({"job_id": job_id})
 
-    original_audio = AudioSegment.from_mp3(original_audio_path)
+########################################
+# 3. Función que hace el trabajo real (en un hilo)
+########################################
+def process_file(job_id, file_path, source_lang, target_lang):
+    try:
+        # 3a) Cambiamos estado a "upload_done"
+        jobs[job_id]["status"] = "upload_done"
+        jobs[job_id]["progress"] = 10
 
-    # Detectar segmentos sin silencio (voz hablada)
-    nonsilent_parts = silence.detect_nonsilent(
-        original_audio, min_silence_len=500, silence_thresh=original_audio.dBFS - 14
-    )
+        # 3b) Llamamos a whisper-api para transcribir y traducir el texto
+        jobs[job_id]["status"] = "transcribing"
+        jobs[job_id]["progress"] = 30
 
-    if nonsilent_parts:
-        inicio_voz = nonsilent_parts[0][0]
-        fin_voz = nonsilent_parts[-1][1]
-    else:
-        inicio_voz, fin_voz = 0, len(original_audio)
+        # Ejemplo de llamada al whisper-api (asumiendo que se llama "http://whisper-api:5000/transcribe")
+        # y que este endpoint permite enviar 'file' directamente, o un path, etc.
+        with open(file_path, "rb") as f:
+            files = {"file": (file_path, f)}
+            data = {
+                "source_lang": source_lang,
+                "target_lang": target_lang
+            }
+            response = requests.post("http://whisper-api:5000/transcribe", files=files, data=data)
+        
+        if response.status_code != 200:
+            jobs[job_id]["status"] = "error"
+            jobs[job_id]["error"] = f"Error en whisper-api: {response.text}"
+            return
+        
+        transcription_json = response.json()
+        transcription_text = transcription_json.get("transcription", "")
+        jobs[job_id]["transcription"] = transcription_text
+        jobs[job_id]["status"] = "transcribed"
+        jobs[job_id]["progress"] = 50
 
-    # Extraer segmentos intro, voz original y outro
-    intro = original_audio[:inicio_voz]
-    outro = original_audio[fin_voz:]
-    original_voice_segment = original_audio[inicio_voz:fin_voz]
+        # 3c) Llamamos a video-processor para generar el video traducido (ejemplo)
+        #     Supongamos que en "video-processor" hay un endpoint /process_video
+        #     que recibe el file_path y la transcripción y produce un MP4 con subtítulos
+        jobs[job_id]["status"] = "generating_video"
+        jobs[job_id]["progress"] = 70
 
-    # Crear audio traducido concatenando frases individuales para mayor fluidez
-    translated_voice = AudioSegment.empty()
-    sentences = translated_text.split('. ')
+        resp = requests.post(
+            "http://video-processor:5001/process_video",
+            json={
+                "file_path": file_path,
+                "transcription": transcription_text,
+                "target_lang": target_lang
+            }
+        )
+        if resp.status_code != 200:
+            jobs[job_id]["status"] = "error"
+            jobs[job_id]["error"] = f"Error en video-processor: {resp.text}"
+            return
+        
+        # Supongamos que el video-processor devuelve la ruta final del video
+        processed_json = resp.json()
+        translated_video_name = processed_json.get("translated_video_name", "translated.mp4")
+        video_url = os.path.join(TRANSLATED_VIDEOS_FOLDER, translated_video_name)
 
-    for sentence in sentences:
-        if sentence.strip():
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as temp_audio:
-                temp_filename = temp_audio.name
-                tts = gTTS(sentence.strip(), lang=target_lang)
-                tts.save(temp_filename)
-                sentence_audio = AudioSegment.from_mp3(temp_filename)
-                translated_voice += sentence_audio
-                os.remove(temp_filename)
+        jobs[job_id]["video_url"] = f"/download_video/{translated_video_name}"
+        jobs[job_id]["status"] = "completed"
+        jobs[job_id]["progress"] = 100
 
-    # Ajustar velocidad de voz traducida para sincronización exacta
-    duration_original_voice = original_voice_segment.duration_seconds
-    duration_translated_voice = translated_voice.duration_seconds
+    except Exception as e:
+        jobs[job_id]["status"] = "error"
+        jobs[job_id]["error"] = str(e)
 
-    if duration_original_voice > 0 and duration_translated_voice > 0:
-        speed_factor = duration_translated_voice / duration_original_voice
-        speed_factor = max(0.8, min(speed_factor, 1.2))
-    else:
-        speed_factor = 1.0
-
-    translated_voice = translated_voice.speedup(playback_speed=speed_factor, crossfade=0)
-
-    # Reconstruir audio completo con intro y outro original
-    final_audio = intro + translated_voice + outro
-    audio_final_path = os.path.join(OUTPUT_FOLDER, f"sync_{os.path.splitext(filename)[0]}_{target_lang}.mp3")
-    final_audio.export(audio_final_path, format="mp3")
-
-    # Crear el vídeo final con audio traducido sincronizado
-    final_audio_clip = mp.AudioFileClip(audio_final_path)
-    final_video_clip = original_clip.set_audio(final_audio_clip)
-
-    translated_video_filename = f"{os.path.splitext(filename)[0]}_{target_lang}_translated.mp4"
-    translated_video_path = os.path.join(TRANSLATED_VIDEO_FOLDER, translated_video_filename)
-    final_video_clip.write_videofile(translated_video_path, codec="libx264", audio_codec="aac")
-
+########################################
+# 4. Endpoint para consultar el estado: /status/<job_id>
+########################################
+@app.route("/status/<job_id>", methods=["GET"])
+def get_status(job_id):
+    """Devuelve el estado del trabajo en JSON."""
+    job_info = jobs.get(job_id)
+    if not job_info:
+        return jsonify({"error": "Job no encontrado"}), 404
     return jsonify({
-        "message": "Procesamiento completado",
-        "transcription": translated_text,
-        "translated_audio": f"/download/{os.path.basename(audio_final_path)}",
-        "translated_video": f"/download_video/{translated_video_filename}"
+        "status": job_info["status"],
+        "progress": job_info["progress"],
+        "transcription": job_info["transcription"],
+        "video_url": job_info["video_url"],
+        "error": job_info["error"]
     })
 
-@app.route("/download/<filename>")
-def download_audio(filename):
-    return send_from_directory(OUTPUT_FOLDER, filename, as_attachment=True)
+########################################
+# 5. (Opcional) Endpoint para descargar video
+########################################
+@app.route("/download_video/<filename>", methods=["GET"])
+def download_video(filename):
+    """Devuelve el archivo de video final (si existe)."""
+    path = os.path.join(TRANSLATED_VIDEOS_FOLDER, filename)
+    if not os.path.exists(path):
+        return jsonify({"error": "Video no encontrado"}), 404
 
-@app.route("/download_video/<filename>")
-def download_translated_video(filename):
-    return send_from_directory(TRANSLATED_VIDEO_FOLDER, filename, as_attachment=True)
+    # En Flask se puede devolver un archivo con send_file
+    from flask import send_file
+    return send_file(path, as_attachment=True)
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5002)
