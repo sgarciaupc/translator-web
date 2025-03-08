@@ -42,37 +42,36 @@ def upload_file():
     )
     translated_text = response.json().get("transcription")
 
-    # Extraer audio original completo
     original_clip = mp.VideoFileClip(file_path)
     original_audio_path = os.path.join(OUTPUT_FOLDER, "original_audio.mp3")
     original_clip.audio.write_audiofile(original_audio_path)
 
     original_audio = AudioSegment.from_mp3(original_audio_path)
 
-    # Detectar voz (evitando silencios largos)
     nonsilent_parts = silence.detect_nonsilent(
-        original_audio, min_silence_len=500, silence_thresh=original_audio.dBFS - 16
+        original_audio, min_silence_len=500, silence_thresh=original_audio.dBFS - 14
     )
 
-    inicio_voz = nonsilent_parts[0][0]
-    fin_voz = nonsilent_parts[-1][1]
+    if nonsilent_parts:
+        inicio_voz = nonsilent_parts[0][0]
+        fin_voz = nonsilent_parts[-1][1]
+    else:
+        inicio_voz, fin_voz = 0, len(original_audio)
 
     intro = original_audio[:inicio_voz]
     outro = original_audio[fin_voz:]
     original_voice_segment = original_audio[inicio_voz:fin_voz]
 
-    # Crear audio traducido con gTTS (estable y probado)
     translated_audio_path_mp3 = os.path.join(OUTPUT_FOLDER, "translated_audio.mp3")
     tts = gTTS(translated_text, lang=target_lang)
     tts.save(translated_audio_path_mp3)
 
     translated_voice = AudioSegment.from_mp3(translated_audio_path_mp3)
 
-    # Sincronización ajustando duración traducida con la original
     duration_original_voice = original_voice_segment.duration_seconds
     duration_translated_voice = translated_voice.duration_seconds
 
-    if duration_original_voice > 0 and duration_translated_voice > 0:
+    if duration_translated_voice > 0:
         speed_factor = duration_translated_voice / duration_original_voice
         speed_factor = max(0.8, min(speed_factor, 1.2))
     else:
@@ -84,7 +83,6 @@ def upload_file():
     audio_final_path = os.path.join(OUTPUT_FOLDER, f"sync_{os.path.splitext(filename)[0]}_{target_lang}.mp3")
     final_audio.export(audio_final_path, format="mp3")
 
-    # Crear video sincronizado
     final_audio_clip = mp.AudioFileClip(audio_final_path)
     final_video_clip = original_clip.set_audio(final_audio_clip)
 
