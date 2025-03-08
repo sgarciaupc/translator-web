@@ -2,7 +2,7 @@ FROM python:3.9-slim
 
 # Instalar dependencias
 RUN apt-get update && apt-get install -y ffmpeg libsm6 libxext6 espeak-ng git && rm -rf /var/lib/apt/lists/*
-RUN pip install flask flask-cors requests gtts moviepy==1.0.3 pydub numpy pyttsx3
+RUN pip install flask flask-cors requests gtts moviepy==1.0.3 pydub numpy pyttsx3 TTS
 
 
 # Establecer directorio de trabajo

@@ -3,7 +3,7 @@ import requests
 from flask import Flask, request, render_template, jsonify, send_from_directory
 import moviepy.editor as mp
 from pydub import AudioSegment, silence
-from gtts import gTTS
+from TTS.api import TTS  # Usamos Coqui-TTS
 import tempfile
 
 app = Flask(__name__)
@@ -22,6 +22,13 @@ WHISPER_API_URL = "http://whisper-api:5000/transcribe"
 @app.route("/")
 def index():
     return render_template("index.html")
+
+def generate_speech(text, lang="es", model="tts_models/es/css10/vits"):
+    """Genera voz a partir de texto con Coqui-TTS y devuelve la ruta del archivo de audio."""
+    tts = TTS(model_name=model)
+    audio_path = tempfile.NamedTemporaryFile(delete=False, suffix=".wav").name
+    tts.tts_to_file(text=text, file_path=audio_path)
+    return audio_path
 
 @app.route("/upload", methods=["POST"])
 def upload_file():
@@ -67,31 +74,24 @@ def upload_file():
     outro = original_audio[fin_voz:]
     original_voice_segment = original_audio[inicio_voz:fin_voz]
 
-    # Crear audio traducido concatenando frases individuales para mayor fluidez
-    translated_voice = AudioSegment.empty()
-    sentences = translated_text.split('. ')
+    # Procesar el texto para eliminar pausas innecesarias
+    clean_text = translated_text.replace("\n", " ").replace(". ", " ")
 
-    for sentence in sentences:
-        if sentence.strip():
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as temp_audio:
-                temp_filename = temp_audio.name
-                tts = gTTS(sentence.strip(), lang=target_lang)
-                tts.save(temp_filename)
-                sentence_audio = AudioSegment.from_mp3(temp_filename)
-                translated_voice += sentence_audio
-                os.remove(temp_filename)
+    # Generar audio traducido
+    translated_audio_path = generate_speech(clean_text, lang=target_lang)
+    translated_voice = AudioSegment.from_wav(translated_audio_path)
 
     # Ajustar velocidad de voz traducida para sincronización exacta
-    duration_original_voice = original_voice_segment.duration_seconds
-    duration_translated_voice = translated_voice.duration_seconds
+    duration_original_voice = len(original_voice_segment) / 1000  # Convertir a segundos
+    duration_translated_voice = len(translated_voice) / 1000
 
     if duration_original_voice > 0 and duration_translated_voice > 0:
         speed_factor = duration_translated_voice / duration_original_voice
-        speed_factor = max(0.8, min(speed_factor, 1.2))
+        speed_factor = max(0.9, min(speed_factor, 1.1))  # Evita distorsiones extremas
     else:
         speed_factor = 1.0
 
-    translated_voice = translated_voice.speedup(playback_speed=speed_factor, crossfade=0)
+    translated_voice = translated_voice.speedup(playback_speed=speed_factor, crossfade=30)
 
     # Reconstruir audio completo con intro y outro original
     final_audio = intro + translated_voice + outro
