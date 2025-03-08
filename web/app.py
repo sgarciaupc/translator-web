@@ -4,6 +4,7 @@ from flask import Flask, request, render_template, jsonify, send_from_directory
 import moviepy.editor as mp
 from pydub import AudioSegment, silence
 from gtts import gTTS
+import tempfile
 
 app = Flask(__name__)
 
@@ -62,16 +63,21 @@ def upload_file():
     outro = original_audio[fin_voz:]
     original_voice_segment = original_audio[inicio_voz:fin_voz]
 
-    translated_audio_path_mp3 = os.path.join(OUTPUT_FOLDER, "translated_audio.mp3")
-    tts = gTTS(translated_text, lang=target_lang)
-    tts.save(translated_audio_path_mp3)
-
-    translated_voice = AudioSegment.from_mp3(translated_audio_path_mp3)
+    translated_voice = AudioSegment.empty()
+    sentences = translated_text.split('. ')
+    
+    for sentence in sentences:
+        if sentence.strip():
+            tts = gTTS(sentence.strip(), lang=target_lang)
+            sentence_audio_path = os.path.join(OUTPUT_FOLDER, "temp_sentence.mp3")
+            tts.save(sentence_audio_path)
+            sentence_audio = AudioSegment.from_mp3(sentence_audio_path)
+            translated_voice = translated_voice + sentence_audio_path
 
     duration_original_voice = original_voice_segment.duration_seconds
     duration_translated_voice = translated_voice.duration_seconds
 
-    if duration_translated_voice > 0:
+    if duration_original_voice > 0 and duration_translated_voice > 0:
         speed_factor = duration_translated_voice / duration_original_voice
         speed_factor = max(0.8, min(speed_factor, 1.2))
     else:
